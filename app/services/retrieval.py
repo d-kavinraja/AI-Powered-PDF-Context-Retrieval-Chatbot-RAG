@@ -1,16 +1,26 @@
+# app/services/retrieval.py
 from app.services.chroma_db import get_chroma_client
 import google.generativeai as genai
 import logging
-import os # Import os for basename, although not directly used in this snippet, good practice for full file
+import os
 
 logger = logging.getLogger(__name__)
 
-# It's better to load API key from environment for production
-# For testing, we are directly configuring it as per previous conversation
-genai.configure(api_key=os.getenv("GEMINI_API_KEY", "AIzaSyA7y2jAw1WbuCkLKNCx-M7sPBa85ewGvNs"))
+# Get the API key from the environment
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in environment variables. Make sure it's in your .env file.")
+
+# Configure the Gemini client
+genai.configure(api_key=api_key)
+
+# Initialize the model once
 model = genai.GenerativeModel("gemini-2.5-flash")
 
-def query_rag(query: str, k: int = 3):
+def query_rag(query: str, k: int = 5):
+    """
+    Queries the RAG pipeline.
+    """
     client = get_chroma_client()
 
     try:
@@ -28,50 +38,29 @@ def query_rag(query: str, k: int = 3):
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=k,
-        include=["documents", "metadatas"] # Only include documents and metadatas
+        include=["documents", "metadatas"]
     )
 
-    docs = results.get("documents", [[]])
-    # Ensure docs is not empty and get the first list of documents
-    document_list = docs[0] if docs and len(docs) > 0 else []
-
-    metadatas = results.get("metadatas", [[]])
-    # Ensure metadatas is not empty and get the first list of metadatas
-    metadata_list = metadatas if metadatas and len(metadatas) > 0 else []
-
-    if not document_list:
-        return "No relevant context found in the PDF.", []
-
+    documents = results.get('documents', [[]])[0]
+    metadatas = results.get('metadatas', [[]])[0]
+    
     context_parts = []
     sources = []
-
-    for i, doc in enumerate(document_list):
-        current_meta = {}
-        if i < len(metadata_list):
-            meta_item = metadata_list[i]
-            # Handle cases where meta_item might be a list or other unexpected type
-            if isinstance(meta_item, dict):
-                current_meta = meta_item
-            elif isinstance(meta_item, list) and len(meta_item) > 0 and isinstance(meta_item, dict):
-                # If it's a list containing dicts, take the first dict
-                current_meta = meta_item
-            # For other unexpected types, current_meta remains empty dict
-
-        context_parts.append(doc) # Add document content to context
-
+    for i, doc in enumerate(documents):
+        current_meta = metadatas[i] if i < len(metadatas) else {}
+        context_parts.append(doc)
         sources.append({
-            "chunk_index": current_meta.get("chunk_index", i), # Fallback to index if not found
-            "source": current_meta.get("source", "PDF"), # Fallback to "PDF" if not found
+            "chunk_index": current_meta.get("chunk_index", i),
+            "source": current_meta.get("source", "PDF"),
             "preview": doc[:200] + ("..." if len(doc) > 200 else "")
         })
 
     context = "\n\n".join(context_parts)
-
     if not context.strip():
         return "No relevant context found in the PDF.", []
 
     prompt = f"""Answer the following query using only the provided context.
-If the context does not contain the answer, say "I don't know".
+If the context does not contain the answer, state that the information is not available in the document.
 
 Context:
 {context}
@@ -84,7 +73,7 @@ Answer:"""
     try:
         answer = model.generate_content(prompt).text
     except Exception as e:
-        logger.error(f"Generation error: {e}")
-        return "Error generating answer. Please check the logs.", []
-
+        logger.error(f"LLM generation failed: {e}")
+        return "Failed to generate an answer from the context.", sources
+        
     return answer, sources

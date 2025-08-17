@@ -1,3 +1,4 @@
+# app/services/ingestion.py
 from pypdf import PdfReader
 import google.generativeai as genai
 from app.services.chroma_db import get_chroma_client
@@ -7,8 +8,13 @@ import os
 
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key="AIzaSyA7y2jAw1WbuCkLKNCx-M7sPBa85ewGvNs")
-model = genai.GenerativeModel("gemini-2.5-flash")
+# Get the API key from the environment
+api_key = os.getenv("GEMINI_API_KEY")
+if not api_key:
+    raise ValueError("GEMINI_API_KEY not found in environment variables. Make sure it's in your .env file.")
+
+# Configure the Gemini client
+genai.configure(api_key=api_key)
 
 def extract_text_from_pdf(file_path: str) -> str:
     reader = PdfReader(file_path)
@@ -32,10 +38,8 @@ def chunk_text(text: str, chunk_size: int = 1200, overlap: int = 200) -> List[st
     n = len(text)
     while start < n:
         end = min(start + chunk_size, n)
-        chunk = text[start:end].strip()
-        if chunk:
-            chunks.append(chunk)
-        start = end - overlap if end - overlap > start else end
+        chunks.append(text[start:end])
+        start += chunk_size - overlap
     logger.info(f"Created {len(chunks)} chunks.")
     return chunks
 
@@ -71,11 +75,10 @@ def ingest_pdf(file_path: str) -> Tuple[int, str]:
     metadatas = [{"source": os.path.basename(file_path), "chunk_index": i} for i in range(len(chunks))]
     
     collection.add(
+        ids=ids,
         embeddings=embeddings,
         documents=chunks,
-        metadatas=metadatas,
-        ids=ids
+        metadatas=metadatas
     )
     
-    logger.info(f"Ingested {len(chunks)} documents into Chroma DB.")
     return len(chunks), "pdf_context"
