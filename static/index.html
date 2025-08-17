@@ -1,0 +1,259 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>PDF RAG Chatbot</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: #121a33;
+      --accent: #7aa2ff;
+      --accent-2: #22d3ee;
+      --text: #e6ecff;
+      --muted: #a0accb;
+      --success: #34d399;
+      --danger: #f87171;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Apple Color Emoji","Segoe UI Emoji";
+      color: var(--text);
+      background: var(--bg);
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    #bg-canvas { position: fixed; inset: 0; z-index: 0; }
+    .container {
+      position: relative; z-index: 1;
+      max-width: 1100px; margin: 0 auto; padding: 24px;
+    }
+    header { text-align: center; margin-bottom: 40px; }
+    header h1 { font-size: 2.5rem; }
+    header p { color: var(--muted); }
+    .upload-box {
+      border: 2px dashed var(--accent);
+      border-radius: 12px;
+      padding: 40px;
+      text-align: center;
+      cursor: pointer;
+      transition: background 0.2s, border-color 0.2s;
+    }
+    .upload-box:hover, .upload-box.dragover { background: var(--panel); border-color: var(--accent-2); }
+    .upload-icon { font-size: 48px; }
+    #status { margin-top: 16px; min-height: 24px; }
+    #status.success { color: var(--success); }
+    #status.danger { color: var(--danger); }
+    .chat-area {
+      margin-top: 32px;
+      background: var(--panel);
+      padding: 24px;
+      border-radius: 12px;
+    }
+    .input-group { display: flex; gap: 12px; }
+    #query {
+      flex-grow: 1;
+      background: var(--bg);
+      border: 1px solid var(--accent);
+      border-radius: 8px;
+      padding: 12px;
+      color: var(--text);
+      font-size: 1rem;
+    }
+    #ask-btn {
+      background: var(--accent);
+      border: 0;
+      border-radius: 8px;
+      color: var(--bg);
+      padding: 0 24px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #ask-btn:hover { background: var(--accent-2); }
+    #answer { margin-top: 24px; min-height: 50px; white-space: pre-wrap; line-height: 1.6; }
+    #sources { margin-top: 24px; border-top: 1px solid var(--bg); padding-top: 16px; font-size: 0.9rem; }
+    .source { color: var(--muted); margin-bottom: 8px; }
+  </style>
+</head>
+<body>
+  <canvas id="bg-canvas"></canvas>
+
+  <div class="container">
+    <header>
+      <h1>AI-Powered PDF Chatbot</h1>
+      <p>Upload a PDF and ask questions about its content.</p>
+    </header>
+
+    <div class="upload-box" id="upload-box">
+      <input type="file" id="file-input" hidden accept=".pdf"/>
+      <div class="upload-icon">📄</div>
+      <div>Drag & Drop a PDF here, or click to browse</div>
+      <div id="status"></div>
+    </div>
+
+    <div class="chat-area">
+      <div class="input-group">
+        <input type="text" id="query" placeholder="Ask a question about the PDF..."/>
+        <button id="ask-btn">Ask</button>
+      </div>
+      <div id="answer"></div>
+      <div id="sources"></div>
+    </div>
+  </div>
+
+<script>
+  const uploadBox = document.getElementById('upload-box');
+  const fileInput = document.getElementById('file-input');
+  const statusDiv = document.getElementById('status');
+  const queryBox = document.getElementById('query');
+  const askBtn = document.getElementById('ask-btn');
+  const answerDiv = document.getElementById('answer');
+  const sourcesDiv = document.getElementById('sources');
+
+  // Background animation
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  let particles = [];
+  window.addEventListener('resize', () => {
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+  });
+
+  function createParticles() {
+    for (let i = 0; i < 50; i++) {
+      particles.push({
+        x: Math.random() * canvas.width,
+        y: Math.random() * canvas.height,
+        vx: Math.random() * 0.5 - 0.25,
+        vy: Math.random() * 0.5 - 0.25,
+        size: Math.random() * 2 + 1,
+      });
+    }
+  }
+
+  function animate() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    particles.forEach(p => {
+      p.x += p.vx;
+      p.y += p.vy;
+      if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+      if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+      ctx.fillStyle = 'rgba(122, 162, 255, 0.5)';
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    });
+    requestAnimationFrame(animate);
+  }
+  createParticles();
+  animate();
+
+  // Upload listeners
+  uploadBox.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadBox.classList.add('dragover');
+  });
+
+  uploadBox.addEventListener('dragleave', () => {
+    uploadBox.classList.remove('dragover');
+  });
+
+  uploadBox.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadBox.classList.remove('dragover');
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      handleUpload(files[0]);
+    }
+  });
+
+  uploadBox.addEventListener('click', () => fileInput.click());
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files.length > 0) {
+      handleUpload(fileInput.files[0]);
+    }
+  });
+
+  async function handleUpload(file) {
+    if (file.type !== "application/pdf") {
+      updateStatus('Only PDF files are allowed.', true);
+      return;
+    }
+    updateStatus(`Uploading ${file.name}...`, false);
+    
+    const formData = new FormData();
+    // ----- THIS IS THE FIX -----
+    formData.append('file', file, file.name);
+    
+    try {
+      const res = await fetch('/upload/', {
+        method: 'POST',
+        body: formData
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Upload failed');
+      updateStatus(`Indexed ${data.chunks_indexed} chunks from ${data.filename}.`, false);
+    } catch (e) {
+      updateStatus(`Error: ${e.message}`, true);
+    }
+  }
+
+  function updateStatus(message, isError) {
+    statusDiv.textContent = message;
+    statusDiv.className = isError ? 'danger' : 'success';
+  }
+
+  // Query function
+  askBtn.addEventListener('click', ask);
+  queryBox.addEventListener('keyup', (e) => {
+      if (e.key === 'Enter') {
+          ask();
+      }
+  });
+  
+  async function ask() {
+    const q = queryBox.value.trim();
+    if (!q) { 
+      answerDiv.textContent = 'Please enter a question.'; 
+      return; 
+    }
+    
+    answerDiv.textContent = 'Thinking...';
+    sourcesDiv.innerHTML = '';
+    
+    try {
+      const res = await fetch('/query/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query: q })
+      });
+      
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || 'Query failed');
+      
+      answerDiv.textContent = data.answer || 'No answer available.';
+      
+      // Display sources if available
+      const sources = data.sources || [];
+      if (sources.length) {
+        sourcesDiv.innerHTML = '<h4>Sources</h4>';
+        sources.forEach((s, i) => {
+          const div = document.createElement('div');
+          div.className = 'source';
+          div.textContent = `[${i}] ${s.source || 'PDF'} (chunk ${s.chunk_index || '?'}) — ${s.preview || ''}`;
+          sourcesDiv.appendChild(div);
+        });
+      }
+    } catch (e) {
+      answerDiv.textContent = `Error: ${e.message}`;
+    }
+  }
+
+</script>
+</body>
+</html>
